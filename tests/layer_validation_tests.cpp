@@ -243,9 +243,9 @@ class ErrorMonitor {
 
     // ExpectSuccess now takes an optional argument allowing a custom combination of debug flags
     void ExpectSuccess(VkDebugReportFlagsEXT message_flag_mask = VK_DEBUG_REPORT_ERROR_BIT_EXT) {
-        m_msgFlags = message_flag_mask;
         // Match ANY message matching specified type
         SetDesiredFailureMsg(message_flag_mask, "");
+        m_msgFlags = message_flag_mask; // override mask handling in SetDesired...
     }
 
     void VerifyFound() {
@@ -11197,7 +11197,7 @@ TEST_F(VkLayerTest, InUseDestroyedSignaled) {
     vkQueueSubmit(m_device->m_queue, 1, &submit_info, VK_NULL_HANDLE);
     m_errorMonitor->VerifyFound();
 
-    m_errorMonitor->SetDesiredFailureMsg(0, "");
+    m_errorMonitor->ExpectSuccess(0); // disable all log message processing with flags==0
     vkResetCommandBuffer(m_commandBuffer->handle(), 0);
 
     vkCreateEvent(m_device->device(), &event_create_info, nullptr, &event);
@@ -11293,6 +11293,7 @@ TEST_F(VkLayerTest, InUseDestroyedSignaled) {
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = &semaphore;
     vkQueueSubmit(m_device->m_queue, 1, &submit_info, fence);
+    m_errorMonitor->Reset(); // resume logmsg processing
 
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, VALIDATION_ERROR_00213);
     vkDestroyEvent(m_device->device(), event, nullptr);
