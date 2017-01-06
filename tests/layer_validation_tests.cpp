@@ -122,38 +122,40 @@ class ErrorMonitor {
     ErrorMonitor() {
         test_platform_thread_create_mutex(&m_mutex);
         test_platform_thread_lock_mutex(&m_mutex);
-        m_msgFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT;
-        m_bailout = NULL;
+        Reset();
         test_platform_thread_unlock_mutex(&m_mutex);
     }
 
     ~ErrorMonitor() { test_platform_thread_delete_mutex(&m_mutex); }
 
-    // ErrorMonitor will look for an error message containing the specified string
-    void SetDesiredFailureMsg(VkFlags msgFlags, const char *msgString) {
-        // Also discard all collected messages to this point
-        test_platform_thread_lock_mutex(&m_mutex);
+    // Set monitor to pristine state
+    void Reset()
+    {
+        m_msgFlags = VK_DEBUG_REPORT_ERROR_BIT_EXT;
+        m_bailout = NULL;
+        m_msgFound = VK_FALSE;
         m_failure_message_strings.clear();
-        // If we are looking for a matching string, ignore any IDs
+        m_desired_message_strings.clear();
         m_desired_message_ids.clear();
         m_otherMsgs.clear();
+        m_msgOutstandingCount = 0;
+    }
+
+    // ErrorMonitor will look for an error message containing the specified string(s)
+    void SetDesiredFailureMsg(VkFlags msgFlags, const char *msgString) {
+        test_platform_thread_lock_mutex(&m_mutex);
         m_desired_message_strings.insert(msgString);
-        m_msgFound = VK_FALSE;
-        m_msgFlags = msgFlags;
+        m_msgFlags |= msgFlags;
+        m_msgOutstandingCount++;
         test_platform_thread_unlock_mutex(&m_mutex);
     }
 
-    // ErrorMonitor will look for a message ID matching the specified one
+    // ErrorMonitor will look for a message ID matching the specified one(s)
     void SetDesiredFailureMsg(VkFlags msgFlags, UNIQUE_VALIDATION_ERROR_CODE msg_id) {
-        // Also discard all collected messages to this point
         test_platform_thread_lock_mutex(&m_mutex);
-        m_failure_message_strings.clear();
-        // If we are looking for IDs don't look for strings
-        m_desired_message_strings.clear();
-        m_otherMsgs.clear();
         m_desired_message_ids.insert(msg_id);
-        m_msgFound = VK_FALSE;
-        m_msgFlags = msgFlags;
+        m_msgFlags |= msgFlags;
+        m_msgOutstandingCount++;
         test_platform_thread_unlock_mutex(&m_mutex);
     }
 
@@ -177,6 +179,7 @@ class ErrorMonitor {
                 m_failure_message_strings.insert(errorString);
             } else if (errorString.find(desired_msg) != string::npos) {
                 found_expected = true;
+                m_msgOutstandingCount--;
                 m_failure_message_strings.insert(errorString);
                 m_msgFound = VK_TRUE;
                 result = VK_TRUE;
@@ -195,6 +198,7 @@ class ErrorMonitor {
                 // Double-check that the string matches the error enum
                 if (errorString.find(validation_error_map[desired_id]) != string::npos) {
                     found_expected = true;
+                    m_msgOutstandingCount--;
                     result = VK_TRUE;
                     m_msgFound = VK_TRUE;
                     m_desired_message_ids.erase(desired_id);
@@ -219,7 +223,9 @@ class ErrorMonitor {
 
     VkDebugReportFlagsEXT GetMessageFlags(void) { return m_msgFlags; }
 
-    VkBool32 DesiredMsgFound(void) { return m_msgFound; }
+    VkBool32 AnyDesiredMsgFound(void) { return m_msgFound; }
+
+    VkBool32 AllDesiredMsgsFound(void) { return (0 == m_msgOutstandingCount); }
 
     void SetBailout(bool *bailout) { m_bailout = bailout; }
 
@@ -244,7 +250,7 @@ class ErrorMonitor {
 
     void VerifyFound() {
         // Not seeing the desired message is a failure. /Before/ throwing, dump any other messages.
-        if (!DesiredMsgFound()) {
+        if (!AllDesiredMsgsFound()) {
             DumpFailureMsgs();
             for (auto desired_msg : m_desired_message_strings) {
                 FAIL() << "Did not receive expected error '" << desired_msg << "'";
@@ -253,16 +259,18 @@ class ErrorMonitor {
                 FAIL() << "Did not receive expected error '" << desired_id << "'";
             }
         }
+        Reset();
     }
 
     void VerifyNotFound() {
         // ExpectSuccess() configured us to match anything. Any error is a failure.
-        if (DesiredMsgFound()) {
+        if (AnyDesiredMsgFound()) {
             DumpFailureMsgs();
             for (auto msg : m_failure_message_strings) {
                 FAIL() << "Expected to succeed but got error: " << msg;
             }
         }
+        Reset();
     }
 
   private:
@@ -274,6 +282,7 @@ class ErrorMonitor {
     test_platform_thread_mutex m_mutex;
     bool *m_bailout;
     VkBool32 m_msgFound;
+    int  m_msgOutstandingCount;
 };
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL myDbgFunc(VkFlags msgFlags, VkDebugReportObjectTypeEXT objType, uint64_t srcObject,
