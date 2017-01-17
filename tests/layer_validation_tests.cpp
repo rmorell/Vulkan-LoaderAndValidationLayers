@@ -11152,8 +11152,9 @@ TEST_F(VkLayerTest, SimultaneousUse) {
     vkCmdEndRenderPass(m_commandBuffer->GetBufferHandle());
     vkEndCommandBuffer(m_commandBuffer->handle());
 
-    m_errorMonitor->SetDesiredFailureMsg(0, "");
+    m_errorMonitor->ExpectSuccess(0);
     vkQueueSubmit(m_device->m_queue, 1, &submit_info, VK_NULL_HANDLE);
+    m_errorMonitor->VerifyNotFound();
 
     command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
     vkBeginCommandBuffer(m_commandBuffer->handle(), &command_buffer_begin_info);
