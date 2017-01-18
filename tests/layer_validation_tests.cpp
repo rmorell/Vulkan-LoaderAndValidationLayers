@@ -11917,8 +11917,9 @@ TEST_F(VkLayerTest, QueueForwardProgressFenceWait) {
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = &semaphore;
     vkQueueSubmit(m_device->m_queue, 1, &submit_info, VK_NULL_HANDLE);
-    m_errorMonitor->SetDesiredFailureMsg(0, "");
+    m_errorMonitor->ExpectSuccess(0);
     vkResetCommandBuffer(m_commandBuffer->handle(), 0);
+    m_errorMonitor->VerifyNotFound();
     m_commandBuffer->BeginCommandBuffer();
     m_commandBuffer->EndCommandBuffer();
     m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_ERROR_BIT_EXT, queue_forward_progress_message);
