@@ -10408,15 +10408,15 @@ TEST_F(VkLayerTest, MismatchCountQueueCreateRequestedFeature) {
                      "Use invalid Queue Family Index in vkCreateDevice");
     ASSERT_NO_FATAL_FAILURE(InitState());
 
-    const char *mismatch_count_message = "Call to vkEnumeratePhysicalDevices() "
-                                         "w/ pPhysicalDeviceCount value ";
+    // const char *mismatch_count_message = "Call to vkEnumeratePhysicalDevices() "
+    //                                      "w/ pPhysicalDeviceCount value ";
 
     const char *invalid_queueFamilyIndex_message = "Invalid queue create request in vkCreateDevice(). Invalid "
                                                    "queueFamilyIndex ";
 
     const char *unavailable_feature_message = "While calling vkCreateDevice(), requesting feature #";
 
-    m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_WARNING_BIT_EXT, mismatch_count_message);
+    // m_errorMonitor->SetDesiredFailureMsg(VK_DEBUG_REPORT_WARNING_BIT_EXT, mismatch_count_message);
     // The following test fails with recent NVidia drivers.
     // By the time core_validation is reached, the NVidia
     // driver has sanitized the invalid condition and core_validation
