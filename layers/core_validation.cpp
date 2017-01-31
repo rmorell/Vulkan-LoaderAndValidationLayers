@@ -3427,6 +3427,36 @@ bool FindLayout(const layer_data *my_data, ImageSubresourcePair imgpair, VkImage
     return true;
 }
 
+bool FindLayout( unordered_map<ImageSubresourcePair, IMAGE_LAYOUT_NODE> imageLayoutMap, ImageSubresourcePair imgpair, VkImageLayout &layout,
+                const VkImageAspectFlags aspectMask) {
+    if (!(imgpair.subresource.aspectMask & aspectMask)) {
+        return false;
+    }
+    imgpair.subresource.aspectMask = aspectMask;
+    auto imgsubIt = imageLayoutMap.find(imgpair);
+    if (imgsubIt == imageLayoutMap.end()) {
+        return false;
+    }
+    layout = imgsubIt->second.layout;
+    return true;
+}
+
+// find layout in supplied map
+bool FindLayout(unordered_map<ImageSubresourcePair, IMAGE_LAYOUT_NODE> imageLayoutMap, ImageSubresourcePair imgpair, VkImageLayout &layout) {
+    layout = VK_IMAGE_LAYOUT_MAX_ENUM;
+    FindLayout(imageLayoutMap, imgpair, layout, VK_IMAGE_ASPECT_COLOR_BIT);
+    FindLayout(imageLayoutMap, imgpair, layout, VK_IMAGE_ASPECT_DEPTH_BIT);
+    FindLayout(imageLayoutMap, imgpair, layout, VK_IMAGE_ASPECT_STENCIL_BIT);
+    FindLayout(imageLayoutMap, imgpair, layout, VK_IMAGE_ASPECT_METADATA_BIT);
+    if (layout == VK_IMAGE_LAYOUT_MAX_ENUM) {
+        imgpair = {imgpair.image, false, VkImageSubresource()};
+        auto imgsubIt = imageLayoutMap.find(imgpair);
+        if (imgsubIt == imageLayoutMap.end()) return false;
+        layout = imgsubIt->second.layout;
+    }
+    return true;
+}
+
 // find layout(s) on the cmd buf level
 bool FindLayout(const GLOBAL_CB_NODE *pCB, VkImage image, VkImageSubresource range, IMAGE_CMD_BUF_LAYOUT_NODE &node) {
     ImageSubresourcePair imgpair = {image, true, range};
@@ -3484,6 +3514,11 @@ bool FindLayouts(const layer_data *my_data, VkImage image, std::vector<VkImageLa
         }
     }
     return true;
+}
+
+// Set the layout in supplied map
+void SetLayout(unordered_map<ImageSubresourcePair, IMAGE_LAYOUT_NODE> imageLayoutMap, ImageSubresourcePair imgpair, const VkImageLayout &layout) {
+    imageLayoutMap[imgpair].layout = layout;
 }
 
 // Set the layout on the global level
@@ -4315,11 +4350,11 @@ static bool ValidateStageMaskGsTsEnables(layer_data *dev_data, VkPipelineStageFl
 // This validates that the initial layout specified in the command buffer for
 // the IMAGE is the same
 // as the global IMAGE layout
-static bool ValidateCmdBufImageLayouts(layer_data *dev_data, GLOBAL_CB_NODE *pCB) {
+static bool ValidateCmdBufImageLayouts(layer_data *dev_data, GLOBAL_CB_NODE *pCB, unordered_map<ImageSubresourcePair, IMAGE_LAYOUT_NODE> imageLayoutMap) {
     bool skip_call = false;
     for (auto cb_image_data : pCB->imageLayoutMap) {
         VkImageLayout imageLayout;
-        if (!FindLayout(dev_data, cb_image_data.first, imageLayout)) {
+        if (!FindLayout(imageLayoutMap, cb_image_data.first, imageLayout)) {
             skip_call |= log_msg(dev_data->report_data, VK_DEBUG_REPORT_ERROR_BIT_EXT,
                                  VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT, 0, __LINE__, DRAWSTATE_INVALID_IMAGE_LAYOUT, "DS",
                                  "Cannot submit cmd buffer using deleted image 0x%" PRIx64 ".",
@@ -4349,10 +4384,18 @@ static bool ValidateCmdBufImageLayouts(layer_data *dev_data, GLOBAL_CB_NODE *pCB
                                 string_VkImageLayout(cb_image_data.second.initialLayout));
                 }
             }
-            SetLayout(dev_data, cb_image_data.first, cb_image_data.second.layout);
+            SetLayout(imageLayoutMap, cb_image_data.first, cb_image_data.second.layout);
         }
     }
     return skip_call;
+}
+
+static void UpdateCmdBufImageLayouts(layer_data *dev_data, GLOBAL_CB_NODE *pCB) {
+    for (auto cb_image_data : pCB->imageLayoutMap) {
+        VkImageLayout imageLayout;
+        FindLayout(dev_data, cb_image_data.first, imageLayout);
+        SetLayout(dev_data, cb_image_data.first, cb_image_data.second.layout);
+    }
 }
 
 // Loop through bound objects and increment their in_use counts if increment parameter is true
@@ -4806,6 +4849,7 @@ static void PostCallRecordQueueSubmit(layer_data *dev_data, VkQueue queue, uint3
         for (uint32_t i = 0; i < submit->commandBufferCount; i++) {
             auto cb_node = getCBNode(dev_data, submit->pCommandBuffers[i]);
             if (cb_node) {
+                UpdateCmdBufImageLayouts(dev_data, cb_node);
                 incrementResources(dev_data, cb_node);
                 if (!cb_node->secondaryCommandBuffers.empty()) {
                     for (auto secondaryCmdBuffer : cb_node->secondaryCommandBuffers) {
@@ -4882,7 +4926,8 @@ static bool PreCallValidateQueueSubmit(layer_data *dev_data, VkQueue queue, uint
         }
         for (uint32_t i = 0; i < submit->commandBufferCount; i++) {
             auto cb_node = getCBNode(dev_data, submit->pCommandBuffers[i]);
-            skip_call |= ValidateCmdBufImageLayouts(dev_data, cb_node);
+            unordered_map<ImageSubresourcePair, IMAGE_LAYOUT_NODE> localImageLayoutMap = dev_data->imageLayoutMap;
+            skip_call |= ValidateCmdBufImageLayouts(dev_data, cb_node, localImageLayoutMap);
             if (cb_node) {
                 cbs->push_back(submit->pCommandBuffers[i]);
                 for (auto secondaryCmdBuffer : cb_node->secondaryCommandBuffers) {
