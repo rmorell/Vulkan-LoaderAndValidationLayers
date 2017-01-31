@@ -4809,7 +4809,8 @@ static bool ValidateFenceForSubmit(layer_data *dev_data, FENCE_NODE *pFence) {
 }
 
 static void PostCallRecordQueueSubmit(layer_data *dev_data, VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSubmits,
-                                      VkFence fence, std::vector<VkCommandBuffer> *cbs) {
+                                      VkFence fence) {
+    std::vector<VkCommandBuffer> cbs;
     auto pQueue = getQueueState(dev_data, queue);
     auto pFence = getFenceNode(dev_data, fence);
 
@@ -4849,6 +4850,10 @@ static void PostCallRecordQueueSubmit(layer_data *dev_data, VkQueue queue, uint3
         for (uint32_t i = 0; i < submit->commandBufferCount; i++) {
             auto cb_node = getCBNode(dev_data, submit->pCommandBuffers[i]);
             if (cb_node) {
+                cbs.push_back(submit->pCommandBuffers[i]);
+                for (auto secondaryCmdBuffer : cb_node->secondaryCommandBuffers) {
+                    cbs.push_back(secondaryCmdBuffer);
+                }
                 UpdateCmdBufImageLayouts(dev_data, cb_node);
                 incrementResources(dev_data, cb_node);
                 if (!cb_node->secondaryCommandBuffers.empty()) {
@@ -4859,7 +4864,7 @@ static void PostCallRecordQueueSubmit(layer_data *dev_data, VkQueue queue, uint3
                 }
             }
         }
-        pQueue->submissions.emplace_back(*cbs, semaphore_waits, semaphore_signals,
+        pQueue->submissions.emplace_back(cbs, semaphore_waits, semaphore_signals,
                                          submit_idx == submitCount - 1 ? fence : VK_NULL_HANDLE);
     }
 
@@ -4873,7 +4878,7 @@ static void PostCallRecordQueueSubmit(layer_data *dev_data, VkQueue queue, uint3
 }
 
 static bool PreCallValidateQueueSubmit(layer_data *dev_data, VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSubmits,
-                                       VkFence fence, std::vector<VkCommandBuffer> *cbs) {
+                                       VkFence fence) {
     auto pFence = getFenceNode(dev_data, fence);
     bool skip_call = ValidateFenceForSubmit(dev_data, pFence);
     if (skip_call) {
@@ -4929,11 +4934,6 @@ static bool PreCallValidateQueueSubmit(layer_data *dev_data, VkQueue queue, uint
             unordered_map<ImageSubresourcePair, IMAGE_LAYOUT_NODE> localImageLayoutMap = dev_data->imageLayoutMap;
             skip_call |= ValidateCmdBufImageLayouts(dev_data, cb_node, localImageLayoutMap);
             if (cb_node) {
-                cbs->push_back(submit->pCommandBuffers[i]);
-                for (auto secondaryCmdBuffer : cb_node->secondaryCommandBuffers) {
-                    cbs->push_back(secondaryCmdBuffer);
-                }
-
                 current_cmds.insert(submit->pCommandBuffers[i]);
                 skip_call |= validatePrimaryCommandBufferState(dev_data, cb_node, (int) current_cmds.count(submit->pCommandBuffers[i]));
                 skip_call |= validateQueueFamilyIndices(dev_data, cb_node, queue);
@@ -4962,10 +4962,9 @@ static bool PreCallValidateQueueSubmit(layer_data *dev_data, VkQueue queue, uint
 
 VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo *pSubmits, VkFence fence) {
     layer_data *dev_data = get_my_data_ptr(get_dispatch_key(queue), layer_data_map);
-    std::vector<VkCommandBuffer> cbs;
     std::unique_lock<std::mutex> lock(global_lock);
 
-    bool skip = PreCallValidateQueueSubmit(dev_data, queue, submitCount, pSubmits, fence, &cbs);
+    bool skip = PreCallValidateQueueSubmit(dev_data, queue, submitCount, pSubmits, fence);
     lock.unlock();
 
     if (skip)
@@ -4974,7 +4973,7 @@ VKAPI_ATTR VkResult VKAPI_CALL QueueSubmit(VkQueue queue, uint32_t submitCount, 
     VkResult result = dev_data->dispatch_table.QueueSubmit(queue, submitCount, pSubmits, fence);
 
     lock.lock();
-    PostCallRecordQueueSubmit(dev_data, queue, submitCount, pSubmits, fence, &cbs);
+    PostCallRecordQueueSubmit(dev_data, queue, submitCount, pSubmits, fence);
     lock.unlock();
     return result;
 }
